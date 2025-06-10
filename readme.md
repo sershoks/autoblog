@@ -121,7 +121,6 @@ Voici les deux fichiers Python, complets et prêts à être utilisés.
 Ce fichier définit les "super-pouvoirs" de vos agents : chercher sur le web local, interagir avec WordPress, etc.
 
 ```python
-# tools.py
 import os
 import requests
 import json
@@ -132,6 +131,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class SearxNGSearchTool(BaseTool):
+    # CORRECTION : Ajout de l'annotation de type ': str'
     name: str = "Moteur de Recherche Local"
     description: str = "Indispensable pour faire des recherches sur internet. Utilise une instance locale de SearxNG pour trouver des informations récentes ou des articles de blog."
 
@@ -160,8 +160,9 @@ class SearxNGSearchTool(BaseTool):
             return f"Une erreur est survenue lors de la recherche : {e}"
 
 class WordPressTool(BaseTool):
-    name = "Outil WordPress"
-    description = "Indispensable pour interagir avec un site WordPress. Permet de récupérer les tags existants et de publier de nouveaux articles."
+    # CORRECTION : Ajout de l'annotation de type ': str'
+    name: str = "Outil WordPress"
+    description: str = "Indispensable pour interagir avec un site WordPress. Permet de récupérer les tags existants et de publier de nouveaux articles."
 
     def _run(self, action: str, title: str = None, content: str = None, tags_ids: list = None):
         """Exécute une action sur WordPress."""
@@ -196,8 +197,9 @@ class WordPressTool(BaseTool):
             return "Action non reconnue. Utilisez 'get_existing_tags' ou 'publish_post'."
 
 class WebhookTool(BaseTool):
-    name = "Outil Webhook"
-    description = "Utilisé pour envoyer des données (article, note, raison) à un endpoint spécifique via une requête POST."
+    # CORRECTION : Ajout de l'annotation de type ': str'
+    name: str = "Outil Webhook"
+    description: str = "Utilisé pour envoyer des données (article, note, raison) à un endpoint spécifique via une requête POST."
 
     def _run(self, data: dict):
         """Envoie les données au webhook de rejet."""
