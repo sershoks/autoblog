@@ -401,36 +401,39 @@ Vous disposez maintenant d'une solution complète, documentée et prête à êtr
 
 Parfait ! C'est une autre erreur de validation, mais cette fois-ci, elle nous guide vers une solution beaucoup plus moderne et robuste.
 
-L'Explication Simple et le Plan d'Action
+### **L'Explication Simple et le Plan d'Action**
 
-Le Warning (LangChainDeprecationWarning) : LangChain est en pleine évolution. Ils ont séparé la librairie principale en plus petits paquets. Le message nous dit simplement que la façon d'appeler Ollama est maintenant dans un paquet dédié, langchain-ollama. C'est une bonne pratique de corriger cela.
+1.  **Le Warning (`LangChainDeprecationWarning`) :** LangChain est en pleine évolution. Ils ont séparé la librairie principale en plus petits paquets. Le message nous dit simplement que la façon d'appeler `Ollama` est maintenant dans un paquet dédié, `langchain-ollama`. C'est une bonne pratique de corriger cela.
 
-L'Erreur (ValidationError) : C'est le vrai problème. L'erreur Input should be a valid dictionary or instance of BaseTool est trompeuse. Bien que nos classes héritent bien de BaseTool, les versions récentes de CrewAI/LangChain/Pydantic préfèrent une manière plus simple et plus moderne de définir des outils : utiliser le décorateur @tool au lieu de créer des classes entières.
+2.  **L'Erreur (`ValidationError`) :** C'est le vrai problème. L'erreur `Input should be a valid dictionary or instance of BaseTool` est trompeuse. Bien que nos classes héritent bien de `BaseTool`, les versions récentes de CrewAI/LangChain/Pydantic préfèrent une manière plus simple et plus moderne de définir des outils : **utiliser le décorateur `@tool`** au lieu de créer des classes entières.
 
-Le plan est donc de :
+**Le plan est donc de :**
+1.  Mettre à jour nos installations `pip` pour inclure le nouveau paquet `langchain-ollama`.
+2.  Modifier `crew.py` pour utiliser la nouvelle façon d'appeler Ollama.
+3.  **Réécrire complètement `tools.py`** en transformant nos classes en simples fonctions Python décorées avec `@tool`. C'est plus propre, plus simple et c'est ce que le système attend maintenant.
+4.  Modifier `crew.py` pour qu'il utilise ces nouvelles fonctions-outils.
 
-Mettre à jour nos installations pip pour inclure le nouveau paquet langchain-ollama.
+---
 
-Modifier crew.py pour utiliser la nouvelle façon d'appeler Ollama.
-
-Réécrire complètement tools.py en transformant nos classes en simples fonctions Python décorées avec @tool. C'est plus propre, plus simple et c'est ce que le système attend maintenant.
-
-Modifier crew.py pour qu'il utilise ces nouvelles fonctions-outils.
-
-Étape 1 : Mettre à Jour les Dépendances
+### **Étape 1 : Mettre à Jour les Dépendances**
 
 Arrêtez votre script. Dans votre terminal avec l'environnement virtuel activé, exécutez cette commande pour installer le nouveau paquet et vous assurer que tout est à jour :
 
+```bash
 pip install -U crewai crewai-tools langchain-community langchain-ollama python-dotenv requests beautifulsoup4
+```
 
-Étape 2 : Réécriture Complète des Fichiers de Code
+---
 
-Voici les versions entièrement corrigées et modernisées de tools.py et crew.py.
+### **Étape 2 : Réécriture Complète des Fichiers de Code**
 
-Fichier tools.py - VERSION MODERNE
+Voici les versions entièrement corrigées et modernisées de `tools.py` et `crew.py`.
 
-Remplacez tout le contenu de votre fichier tools.py par ce qui suit. Remarquez que nous n'avons plus de classes, juste des fonctions.
+#### **Fichier `tools.py` - VERSION MODERNE**
 
+Remplacez **tout le contenu** de votre fichier `tools.py` par ce qui suit. Remarquez que nous n'avons plus de classes, juste des fonctions.
+
+```python
 # tools.py
 import os
 import requests
@@ -507,16 +510,15 @@ def send_to_webhook(data: dict) -> str:
         return "Données envoyées au webhook de révision avec succès."
     except requests.exceptions.RequestException as e:
         return f"Erreur lors de l'envoi au webhook: {e}"
-IGNORE_WHEN_COPYING_START
-content_copy
-download
-Use code with caution.
-Python
-IGNORE_WHEN_COPYING_END
-Fichier crew.py - VERSION CORRIGÉE ET MODERNE
+```
 
-Remplacez tout le contenu de votre fichier crew.py. Les changements sont importants : nous importons les nouvelles fonctions, nous les passons différemment aux agents, et nous les appelons directement à la fin.
+---
 
+#### **Fichier `crew.py` - VERSION CORRIGÉE ET MODERNE**
+
+Remplacez **tout le contenu** de votre fichier `crew.py`. Les changements sont importants : nous importons les nouvelles fonctions, nous les passons différemment aux agents, et nous les appelons directement à la fin.
+
+```python
 # crew.py
 import os
 import json
@@ -669,21 +671,16 @@ if __name__ == '__main__':
         print(result_str)
     except Exception as e:
         print(f"❌ Une erreur inattendue est survenue : {e}")
-IGNORE_WHEN_COPYING_START
-content_copy
-download
-Use code with caution.
-Python
-IGNORE_WHEN_COPYING_END
-Marche à Suivre Finale
+```
 
-Exécutez la commande pip install -U ... d'en haut.
+### **Marche à Suivre Finale**
 
-Remplacez le contenu de tools.py par la nouvelle version.
+1.  Exécutez la commande `pip install -U ...` d'en haut.
+2.  Remplacez le contenu de `tools.py` par la nouvelle version.
+3.  Remplacez le contenu de `crew.py` par la nouvelle version.
+4.  Lancez le script : `python crew.py`.
 
-Remplacez le contenu de crew.py par la nouvelle version.
-
-Lancez le script : python crew.py.
+Cette nouvelle architecture est beaucoup plus alignée avec les dernières versions des librairies et devrait résoudre vos problèmes de validation.
 
 Cette nouvelle architecture est beaucoup plus alignée avec les dernières versions des librairies et devrait résoudre vos problèmes de validation.
 
