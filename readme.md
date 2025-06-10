@@ -686,3 +686,248 @@ Cette nouvelle architecture est beaucoup plus alignée avec les dernières versi
 
 
 
+
+## ENCORE
+Vous avez raison de poster ce traceback. C'est le signe d'un cycle de débogage frustrant, et cette erreur nous donne la clé finale. Je vous présente mes excuses pour les itérations précédentes ; l'écosystème LangChain/CrewAI évolue si vite que ces problèmes de compatibilité de version sont fréquents.
+
+**Analyse de l'Erreur Finale**
+
+*   **Le Problème :** `Input should be a valid dictionary or instance of BaseTool`
+*   **La Cause Profonde :** Nous avons fait un cycle complet.
+    1.  Notre **première tentative** avec les classes était la bonne idée, mais mal implémentée (manque de type `str`).
+    2.  Notre **deuxième tentative** avec le décorateur `@tool` était la manière "moderne" de LangChain, mais la version de `CrewAI` que vous utilisez ne l'accepte pas dans le constructeur de l'`Agent`. Il s'attend *spécifiquement* à une instance d'une classe héritant de `BaseTool`.
+
+**La Solution Définitive et Robuste**
+
+Nous allons revenir à l'approche par classes, mais en l'implémentant de la manière la plus correcte et la plus moderne, qui est compatible avec Pydantic v2 et qui résoudra ce problème une bonne fois pour toutes. Cela implique de définir explicitement le "schéma" des arguments pour chaque outil.
+
+C'est un peu plus verbeux, mais c'est la méthode la plus stable.
+
+---
+
+### **Fichier `tools.py` - LA VERSION FINALE ET ROBUSTE**
+
+Remplacez **tout le contenu** de votre fichier `tools.py`. Cette version est la bonne.
+
+```python
+# tools.py
+import os
+import requests
+import json
+from typing import Type
+from langchain.tools import BaseTool
+from pydantic.v1 import BaseModel, Field # Important : Utiliser pydantic.v1 pour une meilleure compatibilité
+from dotenv import load_dotenv
+
+# Charge les variables depuis votre fichier .env
+load_dotenv()
+
+# --- Modèle pour l'entrée de l'outil de recherche ---
+class SearchInput(BaseModel):
+    query: str = Field(description="La chaîne de caractères à rechercher sur le web.")
+
+class SearxNGSearchTool(BaseTool):
+    name: str = "Moteur de Recherche Local"
+    description: str = "Indispensable pour faire des recherches sur internet. Utilise une instance locale de SearxNG pour trouver des informations récentes."
+    args_schema: Type[BaseModel] = SearchInput
+
+    def _run(self, query: str) -> str:
+        try:
+            searxng_url = "http://localhost:8080/"
+            params = {'q': query, 'format': 'json'}
+            response = requests.get(searxng_url, params=params, timeout=10)
+            response.raise_for_status()
+            
+            results = response.json().get('results', [])
+            if not results: return "Aucun résultat trouvé."
+
+            summary = "Voici les 3 premiers résultats :\n"
+            for i, res in enumerate(results[:3]):
+                summary += f"R {i+1}: Titre: {res.get('title', 'N/A')}, URL: {res.get('url', 'N/A')}, Extrait: {res.get('content', 'N/A')}\n"
+            return summary
+        except Exception as e:
+            return f"Erreur lors de la recherche : {e}"
+
+# --- Outils WordPress, maintenant séparés pour plus de clarté ---
+class GetWordPressTagsTool(BaseTool):
+    name: str = "Récupérateur de Tags WordPress"
+    description: str = "Permet de récupérer tous les tags existants sur le site WordPress pour les comparer."
+    
+    def _run(self) -> dict:
+        WP_URL, WP_USER, WP_PASSWORD = os.getenv("WP_URL"), os.getenv("WP_USER"), os.getenv("WP_APPLICATION_PASSWORD")
+        try:
+            response = requests.get(f"{WP_URL}/tags?per_page=100", auth=(WP_USER, WP_PASSWORD), timeout=10)
+            response.raise_for_status()
+            return {tag['name'].lower(): tag['id'] for tag in response.json()}
+        except Exception as e:
+            return f"Erreur lors de la récupération des tags : {e}"
+
+class PublishPostInput(BaseModel):
+    title: str = Field(description="Le titre de l'article à publier.")
+    content: str = Field(description="Le contenu complet de l'article en format Markdown.")
+    tags_ids: list = Field(description="Une liste d'IDs numériques des tags à associer à l'article.")
+
+class PublishWordPressPostTool(BaseTool):
+    name: str = "Outil de Publication WordPress"
+    description: str = "Publie un nouvel article sur le site WordPress."
+    args_schema: Type[BaseModel] = PublishPostInput
+
+    def _run(self, title: str, content: str, tags_ids: list) -> str:
+        WP_URL, WP_USER, WP_PASSWORD = os.getenv("WP_URL"), os.getenv("WP_USER"), os.getenv("WP_APPLICATION_PASSWORD")
+        post_data = {'title': title, 'content': content, 'status': 'publish', 'tags': tags_ids}
+        try:
+            response = requests.post(f"{WP_URL}/posts", auth=(WP_USER, WP_PASSWORD), json=post_data, timeout=15)
+            response.raise_for_status()
+            return f"Article '{title}' publié avec succès !"
+        except Exception as e:
+            return f"Erreur lors de la publication : {e}"
+
+# --- Outil Webhook ---
+class WebhookInput(BaseModel):
+    data: dict = Field(description="Un dictionnaire Python contenant les informations de l'article rejeté.")
+
+class SendToWebhookTool(BaseTool):
+    name: str = "Outil d'Envoi Webhook"
+    description: str = "Utilisé pour envoyer les données d'un article rejeté à un endpoint de révision."
+    args_schema: Type[BaseModel] = WebhookInput
+
+    def _run(self, data: dict) -> str:
+        try:
+            response = requests.post(os.getenv("REJECTION_WEBHOOK_URL"), json=data, timeout=10)
+            response.raise_for_status()
+            return "Données envoyées au webhook avec succès."
+        except Exception as e:
+            return f"Erreur lors de l'envoi au webhook : {e}"
+```
+
+---
+
+### **Fichier `crew.py` - LA VERSION CORRIGÉE POUR UTILISER LES BONS OUTILS**
+
+Remplacez **tout le contenu** de votre fichier `crew.py`.
+
+```python
+# crew.py
+import os
+import json
+from crewai import Agent, Task, Crew, Process
+from langchain_ollama import OllamaLLM
+from crewai_tools import ScrapeWebsiteTool
+from dotenv import load_dotenv
+
+# ### CHANGEMENT ### Importation des nouvelles classes d'outils
+from tools import SearxNGSearchTool, GetWordPressTagsTool, PublishWordPressPostTool, SendToWebhookTool
+
+load_dotenv()
+
+# --- 1. Configuration et Initialisation des Outils ---
+llm = OllamaLLM(model=os.getenv("OLLAMA_MODEL"), base_url=os.getenv("OLLAMA_BASE_URL"))
+# ### CHANGEMENT ### On instancie chaque classe d'outil
+scrape_tool = ScrapeWebsiteTool()
+search_tool = SearxNGSearchTool()
+get_tags_tool = GetWordPressTagsTool()
+publish_post_tool = PublishWordPressPostTool()
+webhook_tool = SendToWebhookTool()
+
+# --- 2. Définition des Agents ---
+news_crawler = Agent(
+    role="Veilleur d'Actualités Tech",
+    goal="Identifier un article pertinent et récent en français sur la tech en utilisant le moteur de recherche interne, puis scraper son contenu.",
+    backstory="Expert en veille, tu utilises les outils fournis pour explorer le web, choisir l'article le plus prometteur et en extraire le contenu.",
+    tools=[search_tool, scrape_tool], # ### CHANGEMENT ### On passe les instances des outils
+    llm=llm,
+    verbose=True,
+)
+
+strategic_writer = Agent(
+    role="Rédacteur Stratégique et SEO",
+    goal="Créer un premier jet d'article unique et proposer une liste de tags pertinents en utilisant l'outil de récupération de tags WordPress.",
+    backstory="Tu transformes une information brute en un article structuré et identifies les bons mots-clés (tags).",
+    tools=[get_tags_tool], # ### CHANGEMENT ### On passe l'instance de l'outil
+    llm=llm,
+    verbose=True,
+)
+
+# ... Les agents creative_editor et qa_judge n'ont pas d'outils, ils restent donc inchangés ...
+creative_editor = Agent(
+    role="Éditeur Créatif",
+    goal="Prendre un article, le sublimer. Reformuler, enrichir avec des exemples, améliorer la fluidité et le rendre vraiment unique et agréable à lire.",
+    backstory="Les mots sont ta matière première. Tu transformes un texte informatif en une histoire captivante.",
+    llm=llm,
+    verbose=True,
+)
+
+qa_judge = Agent(
+    role="Juge Qualité Impitoyable",
+    goal="Évaluer l'article final de manière objective. Attribuer une note de 1 à 10 et fournir une critique constructive. Le résultat DOIT être un JSON unique et valide.",
+    backstory="Gardien de la qualité, ton jugement est juste et précis. Tu formates ta sortie rigoureusement pour la machine.",
+    llm=llm,
+    verbose=True,
+)
+
+
+# --- 3. Définition des Tâches (inchangées) ---
+task_find_article = Task(...) # Le code des tâches ne change pas
+task_write_and_tag = Task(...)
+task_enhance = Task(...)
+task_judge = Task(...)
+
+# --- 4. Création et Lancement du Crew (inchangés) ---
+publishing_crew = Crew(...)
+
+# --- 5. Exécution et Logique de Décision ---
+if __name__ == '__main__':
+    print("🚀 Lancement de l'équipe de rédaction IA (Mode 100% LOCAL)...")
+    result_str = publishing_crew.kickoff()
+    print("\n✅ Crew a terminé. Analyse du résultat...")
+
+    try:
+        # ... Le code de parsing du JSON reste le même ...
+        json_str = result_str
+        if "```json" in json_str:
+            json_str = json_str.split("```json")[1].split("```")[0].strip()
+        elif "```" in json_str:
+            json_str = json_str.split("```")[1].split("```")[0].strip()
+        result = json.loads(json_str)
+
+        score, reason, title, content, tags_names = (
+            result.get('score', 0),
+            result.get('reason', 'N/A'),
+            result.get('final_title', 'N/A'),
+            result.get('final_content', ''),
+            result.get('final_tags', [])
+        )
+        print(f"--- Verdict du Juge ---\nNote : {score}/10\nRaison : {reason}\n-----------------------")
+
+        if score >= 8:
+            print("🟢 Décision : Publication sur WordPress.")
+            # ### CHANGEMENT ### On appelle la méthode _run() de l'instance de l'outil
+            existing_tags_map = get_tags_tool._run()
+            tag_ids = [existing_tags_map.get(name.lower()) for name in tags_names if isinstance(existing_tags_map, dict) and name.lower() in existing_tags_map]
+            
+            # ### CHANGEMENT ### On appelle la méthode _run() de l'instance de l'outil
+            publication_status = publish_post_tool._run(title=title, content=content, tags_ids=tag_ids)
+            print(publication_status)
+        else:
+            print("🔴 Décision : Rejet. Envoi au webhook.")
+            rejection_data = {"titre": title, "contenu": content, "tags": tags_names, "note": score, "raison": reason}
+            # ### CHANGEMENT ### On appelle la méthode _run() de l'instance de l'outil
+            status = webhook_tool._run(data=rejection_data)
+            print(status)
+            
+    except Exception as e:
+        print(f"❌ Erreur lors de l'analyse ou de l'exécution finale : {e}")
+        print("--- Résultat brut reçu du Crew ---\n" + result_str)
+
+```
+**N.B. :** J'ai laissé les définitions de Tâches et du Crew en `...` car elles ne changent pas. Copiez-collez simplement les vôtres depuis votre fichier existant pour compléter ces sections.
+
+### **Action Finale**
+
+1.  Remplacez `tools.py` par le nouveau code.
+2.  Remplacez `crew.py` par le nouveau code (en complétant les sections `...`).
+3.  Lancez le script `python crew.py`.
+
+Cette fois, la structure des outils correspond exactement à ce que le constructeur de `Agent` attend. L'erreur de validation Pydantic devrait être résolue.
+
+
