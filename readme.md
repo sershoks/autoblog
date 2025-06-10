@@ -394,3 +394,298 @@ if __name__ == '__main__':
     Cela exécutera votre bot tous les matins et enregistrera sa sortie dans un fichier `cron.log` pour que vous puissiez vérifier que tout s'est bien passé.
 
 Vous disposez maintenant d'une solution complète, documentée et prête à être déployée.
+
+
+
+##corectif##
+
+Parfait ! C'est une autre erreur de validation, mais cette fois-ci, elle nous guide vers une solution beaucoup plus moderne et robuste.
+
+L'Explication Simple et le Plan d'Action
+
+Le Warning (LangChainDeprecationWarning) : LangChain est en pleine évolution. Ils ont séparé la librairie principale en plus petits paquets. Le message nous dit simplement que la façon d'appeler Ollama est maintenant dans un paquet dédié, langchain-ollama. C'est une bonne pratique de corriger cela.
+
+L'Erreur (ValidationError) : C'est le vrai problème. L'erreur Input should be a valid dictionary or instance of BaseTool est trompeuse. Bien que nos classes héritent bien de BaseTool, les versions récentes de CrewAI/LangChain/Pydantic préfèrent une manière plus simple et plus moderne de définir des outils : utiliser le décorateur @tool au lieu de créer des classes entières.
+
+Le plan est donc de :
+
+Mettre à jour nos installations pip pour inclure le nouveau paquet langchain-ollama.
+
+Modifier crew.py pour utiliser la nouvelle façon d'appeler Ollama.
+
+Réécrire complètement tools.py en transformant nos classes en simples fonctions Python décorées avec @tool. C'est plus propre, plus simple et c'est ce que le système attend maintenant.
+
+Modifier crew.py pour qu'il utilise ces nouvelles fonctions-outils.
+
+Étape 1 : Mettre à Jour les Dépendances
+
+Arrêtez votre script. Dans votre terminal avec l'environnement virtuel activé, exécutez cette commande pour installer le nouveau paquet et vous assurer que tout est à jour :
+
+pip install -U crewai crewai-tools langchain-community langchain-ollama python-dotenv requests beautifulsoup4
+
+Étape 2 : Réécriture Complète des Fichiers de Code
+
+Voici les versions entièrement corrigées et modernisées de tools.py et crew.py.
+
+Fichier tools.py - VERSION MODERNE
+
+Remplacez tout le contenu de votre fichier tools.py par ce qui suit. Remarquez que nous n'avons plus de classes, juste des fonctions.
+
+# tools.py
+import os
+import requests
+import json
+from langchain.tools import tool
+from dotenv import load_dotenv
+
+# Charge les variables depuis votre fichier .env
+load_dotenv()
+
+@tool("Moteur de Recherche Local")
+def searxng_search_tool(query: str) -> str:
+    """Indispensable pour faire des recherches sur internet. Utilise une instance locale de SearxNG pour trouver des informations récentes ou des articles de blog."""
+    try:
+        searxng_url = "http://localhost:8080/"
+        params = {'q': query, 'format': 'json'}
+        response = requests.get(searxng_url, params=params, timeout=10)
+        response.raise_for_status()
+        
+        results = response.json().get('results', [])
+        if not results:
+            return "Aucun résultat trouvé pour cette recherche."
+
+        summary = "Voici les 3 premiers résultats de la recherche :\n"
+        for i, res in enumerate(results[:3]):
+            summary += f"Résultat {i+1}:\n"
+            summary += f"  Titre: {res.get('title', 'N/A')}\n"
+            summary += f"  URL: {res.get('url', 'N/A')}\n"
+            summary += f"  Extrait: {res.get('content', 'N/A')}\n\n"
+        return summary
+    except requests.exceptions.RequestException as e:
+        return f"Erreur de connexion au moteur de recherche local SearxNG : {e}"
+    except Exception as e:
+        return f"Une erreur est survenue lors de la recherche : {e}"
+
+@tool("Outil de récupération des tags WordPress")
+def get_wordpress_tags() -> dict:
+    """Permet de récupérer tous les tags existants sur le site WordPress pour les comparer."""
+    WP_URL = os.getenv("WP_URL")
+    WP_USER = os.getenv("WP_USER")
+    WP_PASSWORD = os.getenv("WP_APPLICATION_PASSWORD")
+    auth = (WP_USER, WP_PASSWORD)
+    try:
+        response = requests.get(f"{WP_URL}/tags?per_page=100", auth=auth, timeout=10)
+        response.raise_for_status()
+        tags = response.json()
+        return {tag['name'].lower(): tag['id'] for tag in tags}
+    except requests.exceptions.RequestException as e:
+        return f"Erreur lors de la récupération des tags: {e}"
+
+@tool("Outil de publication WordPress")
+def publish_wordpress_post(title: str, content: str, tags_ids: list) -> str:
+    """Publie un nouvel article sur le site WordPress avec un titre, un contenu et une liste d'IDs de tags."""
+    WP_URL = os.getenv("WP_URL")
+    WP_USER = os.getenv("WP_USER")
+    WP_PASSWORD = os.getenv("WP_APPLICATION_PASSWORD")
+    auth = (WP_USER, WP_PASSWORD)
+    headers = {'Content-Type': 'application/json'}
+    post_data = {'title': title, 'content': content, 'status': 'publish', 'tags': tags_ids}
+    try:
+        response = requests.post(f"{WP_URL}/posts", auth=auth, headers=headers, json=post_data, timeout=15)
+        response.raise_for_status()
+        return f"Article '{title}' publié avec succès !"
+    except requests.exceptions.RequestException as e:
+        return f"Erreur lors de la publication de l'article: {e}"
+
+@tool("Outil Webhook")
+def send_to_webhook(data: dict) -> str:
+    """Utilisé pour envoyer les données d'un article rejeté à un endpoint de révision."""
+    webhook_url = os.getenv("REJECTION_WEBHOOK_URL")
+    try:
+        response = requests.post(webhook_url, json=data, timeout=10)
+        response.raise_for_status()
+        return "Données envoyées au webhook de révision avec succès."
+    except requests.exceptions.RequestException as e:
+        return f"Erreur lors de l'envoi au webhook: {e}"
+IGNORE_WHEN_COPYING_START
+content_copy
+download
+Use code with caution.
+Python
+IGNORE_WHEN_COPYING_END
+Fichier crew.py - VERSION CORRIGÉE ET MODERNE
+
+Remplacez tout le contenu de votre fichier crew.py. Les changements sont importants : nous importons les nouvelles fonctions, nous les passons différemment aux agents, et nous les appelons directement à la fin.
+
+# crew.py
+import os
+import json
+from crewai import Agent, Task, Crew, Process
+from langchain_ollama import OllamaLLM # ### CHANGEMENT ### Correction du warning
+from crewai_tools import ScrapeWebsiteTool
+from dotenv import load_dotenv
+
+# ### CHANGEMENT ### Importation des nouvelles fonctions-outils
+from tools import searxng_search_tool, get_wordpress_tags, publish_wordpress_post, send_to_webhook
+
+# Charge toutes les variables du fichier .env
+load_dotenv()
+
+# --- 1. Configuration et Initialisation des Outils ---
+llm = OllamaLLM(model=os.getenv("OLLAMA_MODEL"), base_url=os.getenv("OLLAMA_BASE_URL")) # ### CHANGEMENT ### Correction du warning
+scrape_tool = ScrapeWebsiteTool()
+# Les autres outils sont maintenant des fonctions, pas besoin de les initialiser ici.
+
+# --- 2. Définition des Agents ---
+news_crawler = Agent(
+    role="Veilleur d'Actualités Tech utilisant des outils locaux",
+    goal="Identifier un article pertinent et récent en français sur la tech en utilisant le moteur de recherche interne. Fournir le contenu de l'article le plus prometteur.",
+    backstory="Expert en veille, tu te fies uniquement aux outils fournis pour explorer le web. Tu es méticuleux et tu sais extraire l'URL la plus prometteuse des résultats de recherche pour ensuite en scraper le contenu.",
+    tools=[searxng_search_tool, scrape_tool], # ### CHANGEMENT ### On passe les fonctions directement
+    llm=llm,
+    verbose=True,
+    allow_delegation=False,
+)
+
+strategic_writer = Agent(
+    role="Rédacteur Stratégique et SEO",
+    goal="Créer un premier jet d'article unique basé sur le contenu fourni. Proposer une liste de 2 à 5 tags pertinents en vérifiant avec l'outil WordPress s'ils existent déjà pour les réutiliser.",
+    backstory="Tu écris pour être lu et bien classé. Ta spécialité est de transformer une information brute en un article structuré et d'identifier les bons mots-clés (tags).",
+    tools=[get_wordpress_tags], # ### CHANGEMENT ### On passe la fonction de récupération des tags
+    llm=llm,
+    verbose=True,
+)
+
+creative_editor = Agent(
+    role="Éditeur Créatif",
+    goal="Prendre un article, le sublimer. Reformuler, enrichir avec des exemples, améliorer la fluidité et le rendre vraiment unique et agréable à lire. Le ton doit être professionnel mais accessible.",
+    backstory="Les mots sont ta matière première. Tu transformes un texte informatif en une histoire captivante sans jamais inventer d'informations.",
+    llm=llm,
+    verbose=True,
+)
+
+qa_judge = Agent(
+    role="Juge Qualité Impitoyable",
+    goal="Évaluer l'article final de manière objective. Attribuer une note de 1 à 10 et fournir une critique constructive. Le résultat DOIT être un JSON unique et valide.",
+    backstory="Tu es le gardien de la qualité. Ton jugement est juste, basé sur la clarté, l'originalité et la structure. Tu dois formater ta sortie de manière extrêmement précise pour que la machine puisse la comprendre.",
+    llm=llm,
+    verbose=True,
+)
+
+# --- 3. Définition des Tâches (inchangées) ---
+task_find_article = Task(
+    description="Cherche une actualité tech marquante des dernières 48h en français. Analyse les résultats, choisis l'article le plus intéressant, et scrape son contenu complet.",
+    expected_output="Le contenu textuel complet de l'article choisi, nettoyé de tout élément non pertinent.",
+    agent=news_crawler,
+)
+
+task_write_and_tag = Task(
+    description=(
+        "1. Lis le contenu de l'article fourni. Rédige un nouvel article en Markdown, inspiré de ce contenu mais avec tes propres mots.\n"
+        "2. Utilise l'outil de récupération des tags WordPress pour obtenir la liste des tags existants.\n"
+        "3. Propose une liste de 2 à 5 noms de tags pertinents pour l'article, en privilégiant les noms qui existent déjà."
+    ),
+    expected_output="Un objet Python contenant deux clés: 'article_draft' (le premier jet de l'article en Markdown) et 'suggested_tags' (une liste de noms de tags).",
+    agent=strategic_writer,
+    context=[task_find_article],
+)
+
+task_enhance = Task(
+    description="Prends le premier jet de l'article et la liste de tags. Améliore l'article: rends-le plus engageant, ajoute de la profondeur, reformule les phrases pour un style unique. Ne modifie pas les tags suggérés.",
+    expected_output="Un article finalisé en Markdown, prêt pour une évaluation de qualité, accompagné de la liste de tags non modifiée.",
+    agent=creative_editor,
+    context=[task_write_and_tag],
+)
+
+task_judge = Task(
+    description="Analyse l'article finalisé. Donne une note de 1 à 10. Justifie ta note. Propose un titre final accrocheur. Formate ta réponse en un bloc de code JSON unique et valide, sans aucun texte avant ou après.",
+    expected_output="""Un objet JSON valide contenant les clés suivantes :
+    - "score": (integer) la note de 1 à 10.
+    - "reason": (string) une explication détaillée de la note.
+    - "final_title": (string) le titre final suggéré pour l'article.
+    - "final_content": (string) le contenu complet de l'article en Markdown.
+    - "final_tags": (list of strings) la liste des noms de tags.
+    """,
+    agent=qa_judge,
+    context=[task_enhance],
+)
+
+# --- 4. Création et Lancement du Crew ---
+publishing_crew = Crew(
+    agents=[news_crawler, strategic_writer, creative_editor, qa_judge],
+    tasks=[task_find_article, task_write_and_tag, task_enhance, task_judge],
+    process=Process.sequential,
+    verbose=2,
+)
+
+# --- 5. Exécution et Logique de Décision ---
+if __name__ == '__main__':
+    print("🚀 Lancement de l'équipe de rédaction IA (Mode 100% LOCAL)...")
+    print("🕒 Soyez patient, le processus complet sur CPU est lent.")
+    
+    result_str = publishing_crew.kickoff()
+    
+    print("\n✅ Crew a terminé son travail. Analyse du résultat...")
+
+    try:
+        json_str = result_str
+        if "```json" in json_str:
+            json_str = json_str.split("```json")[1].split("```")[0].strip()
+        elif "```" in json_str:
+            json_str = json_str.split("```")[1].split("```")[0].strip()
+
+        result = json.loads(json_str)
+        
+        score = result.get('score', 0)
+        reason = result.get('reason', 'Raison non fournie.')
+        title = result.get('final_title', 'Titre non fourni.')
+        content = result.get('final_content', 'Contenu non fourni.')
+        tags_names = result.get('final_tags', [])
+
+        print(f"--- Verdict du Juge ---")
+        print(f"Note : {score}/10")
+        print(f"Raison : {reason}")
+        print("-----------------------")
+
+        if score >= 8:
+            print("🟢 Décision : Publication sur WordPress.")
+            # ### CHANGEMENT ### On appelle directement la fonction outil
+            existing_tags_map = get_wordpress_tags()
+            tag_ids = [existing_tags_map.get(name.lower()) for name in tags_names if name.lower() in existing_tags_map]
+            
+            # ### CHANGEMENT ### On appelle directement la fonction outil
+            publication_status = publish_wordpress_post(title=title, content=content, tags_ids=[tid for tid in tag_ids if tid is not None])
+            print(publication_status)
+        else:
+            print("🔴 Décision : Rejet. Envoi des données au webhook de révision.")
+            rejection_data = {"titre": title, "contenu": content, "tags": tags_names, "note": score, "raison": reason}
+            # ### CHANGEMENT ### On appelle directement la fonction outil
+            status = send_to_webhook(data=rejection_data)
+            print(status)
+            
+    except (json.JSONDecodeError, IndexError) as e:
+        print(f"❌ Erreur: Le Juge n'a pas retourné un JSON valide ou le format est inattendu. Erreur: {e}")
+        print("--- Résultat brut reçu du Crew ---")
+        print(result_str)
+    except Exception as e:
+        print(f"❌ Une erreur inattendue est survenue : {e}")
+IGNORE_WHEN_COPYING_START
+content_copy
+download
+Use code with caution.
+Python
+IGNORE_WHEN_COPYING_END
+Marche à Suivre Finale
+
+Exécutez la commande pip install -U ... d'en haut.
+
+Remplacez le contenu de tools.py par la nouvelle version.
+
+Remplacez le contenu de crew.py par la nouvelle version.
+
+Lancez le script : python crew.py.
+
+Cette nouvelle architecture est beaucoup plus alignée avec les dernières versions des librairies et devrait résoudre vos problèmes de validation.
+
+
+
